@@ -179,7 +179,7 @@
         cfg[key] = !cfg[key];
         saveSettings();
         buildMenu();
-      }, { id: key });
+      }, { id: key, autoClose: false });
     };
     toggle("Show play / pause badge while waiting for data", "queuedBadge");
   }
