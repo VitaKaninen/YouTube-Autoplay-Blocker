@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.3.0
+// @version      0.4.0
 // @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; anything else that calls play() is paused again immediately. Shows a "queued" badge while a requested play waits for data, and keeps a per-load timing log for comparing with/without blocking.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
@@ -79,7 +79,7 @@
       spa: !firstVideo,
       playerMs: null, firstAutoPlayMs: null, clickMs: null, loadstartMs: null, metaMs: null,
       mediaReqMs: null, mediaRespMs: null, canplayMs: null, playingMs: null,
-      clicks: 0, blocked: 0,
+      clicks: 0, blocked: 0, mediaReqs: 0, mediaStatuses: "",
     };
   }
 
@@ -205,9 +205,11 @@
   // First media segment request: when it left and when it came back.
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) {
-      if (!/googlevideo\.com\/videoplayback/.test(e.name)) continue;
+      if (!rec || rec.canplayMs !== null || !/googlevideo\.com\/videoplayback/.test(e.name)) continue;
       mark("mediaReqMs", Math.round(e.startTime - navStart));
       mark("mediaRespMs", Math.round(e.responseEnd - navStart));
+      rec.mediaReqs++;
+      rec.mediaStatuses += (rec.mediaStatuses ? "," : "") + (e.responseStatus || "?") + "@" + Math.round(e.responseEnd - navStart);
     }
   }).observe({ type: "resource", buffered: true });
 
