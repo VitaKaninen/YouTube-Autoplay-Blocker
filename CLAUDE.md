@@ -4,13 +4,19 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
 (version bumps, commit+push, comment budget, load-order of `const`s above `cfg`).
 
 ## How it works
-- `installPlayGate()` replaces `HTMLMediaElement.prototype.play` on `unsafeWindow`; a call on the
-  hooked main video with no intent returns a page-side rejected `NotAllowedError` promise (what
-  Firefox's own block returns, which YouTube handles by showing the Play button). Pausing from
-  the `play` event instead lets a frame or two render when data is already buffered (background
-  / discarded-tab loads) - that is the "split second of playback"; the event listener remains only
-  as a fallback. Uses `exportFunction` when present (Firefox content-script sandbox) else direct
-  assignment, and warns if the read-back shows the patch did not take. `refusePlay` toggles it.
+- `installPlayGate()` injects `GATE_SRC` as a `<script>` so it runs in page context on every
+  browser/sandbox. It replaces `HTMLMediaElement.prototype.play`; a call on a video inside
+  `#movie_player` with no intent returns a rejected `NotAllowedError` promise (what Firefox's own
+  block returns, which YouTube handles by showing the Play button) and dispatches `ytab-refused`.
+  Pausing from the `play` event instead lets a frame or two render when data is already buffered
+  (ctrl-click background tabs, discarded-tab restores); that listener remains only as a fallback.
+  Sandbox <-> page channel is `data-ytab-gate` / `data-ytab-intent` on `<html>` (`setIntent()` is
+  the only writer of intent); `data-ytab-gate-installed` is the page-side read-back.
+  YouTube enforces Trusted Types: `script.textContent = src` throws, so the catch creates a
+  policy (`trustedTypes.createPolicy`, allowed by YouTube's CSP) and retries.
+  v0.6-0.7 patched `unsafeWindow.HTMLMediaElement.prototype` from the sandbox; under Firefox
+  Xrays that lands as an expando the page never sees while the sandbox read-back passes - which
+  is why background-tab autoplay still slipped through on LibreWolf. Do not go back to it.
 - Intent is set by capture `mousedown` on `INTENT_SELECTOR` (player, thumbnails, watch/shorts
   links) or capture `keydown` of Space / k / MediaPlayPause outside text fields.
 - Intent is cleared in `syncVideo()` whenever the `?v=` / `/shorts/` id changes or the `<video>`
@@ -55,8 +61,8 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   earlier WebGL / RFP / Troubleshoot-Mode results look inconsistent. WebGL and RFP were not it.
 - With LW's setting on, Firefox rejects `play()` before any event: `firstAutoPlayMs` stays null.
 - Pause-after-`play` showed a frame or two when data was already buffered (ctrl-click background
-  tabs, Auto Tab Discard restores). v0.6.0 refuses the `play()` call instead; Firefox behaviour
-  under Tampermonkey's sandbox is the user's to confirm (console warns if the patch did not take).
+  tabs, Auto Tab Discard restores). v0.8.0 refuses the `play()` call from a page script; if it
+  still slips through on LibreWolf, check the console for "play() gate not installed" first.
 
 ## Testing in the built-in browser pane
 To hold the media at readyState 0 for as long as needed, wrap `window.fetch` and return a
