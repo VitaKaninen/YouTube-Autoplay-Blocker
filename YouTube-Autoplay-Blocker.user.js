@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.4.0
+// @version      0.5.0
 // @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; anything else that calls play() is paused again immediately. Shows a "queued" badge while a requested play waits for data, and keeps a per-load timing log for comparing with/without blocking.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
 // @run-at       document-start
+// @noframes
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand

@@ -26,14 +26,19 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   what the timing log is for.
 - Timing log: one record per video id, flushed on first `playing`; menu "Print timing log"
   gives `console.table` plus medians split by blocking on/off and full-load vs SPA.
-- Menu commands use `{ id }` so `buildMenu()` replaces entries; without it Tampermonkey on
-  Firefox kept stale handlers and "Print" ran twice.
+- Menu commands use `{ id }` so `buildMenu()` replaces entries. `@noframes` is what actually
+  stopped "Print" running twice: every YouTube iframe was registering the same command.
 
 ## Measured (LibreWolf, user's machine, 2026-09-21, 30 full loads of one video)
 - `playing` median: LW autoplay-block + script 16.5 s, script only 16.5 s, neither 17.1 s.
   Neither blocker costs anything. The ~14 s from player-appears to `canplay` is LibreWolf
-  itself (Chromium pane: ~0.7 s); 3 of 30 runs took ~3.7 s. v0.3.0 added loadstart / metadata /
-  first `videoplayback` request+response timestamps to locate it.
+  itself (Chromium pane: ~0.7 s); 3 of 30 runs took ~3.7 s.
+- Located (v0.4.0 fields + console): one `videoplayback?...sabr=1` request, 200 in 300 ms, then
+  silence, then an HLS manifest fetch (`manifest.googlevideo.com/.../hls_variant`) and playback
+  at ~16 s. SABR stalls and the player falls back to HLS. The attestation script
+  (`google.com/js/th/*.js`) logs "Failed to create WebGL context" - LibreWolf ships
+  `webgl.disabled=true`. Hypothesis: no WebGL -> no PO token -> SABR timeout -> HLS fallback.
+  Test = flip `webgl.disabled`, then `privacy.resistFingerprinting`, one at a time.
 - With LW's setting on, Firefox rejects `play()` before any event: `firstAutoPlayMs` stays null.
 - Pause-after-`play` can show a frame or two when data is already buffered ("split second of
   playback"). Refusing the `play()` call itself (prototype patch in page context) would close
