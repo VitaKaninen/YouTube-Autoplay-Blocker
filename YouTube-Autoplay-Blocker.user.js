@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.2.0
+// @version      0.3.0
 // @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; anything else that calls play() is paused again immediately. Shows a "queued" badge while a requested play waits for data, and keeps a per-load timing log for comparing with/without blocking.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
@@ -9,7 +9,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
-// @grant        GM_unregisterMenuCommand
 // @downloadURL  https://raw.githubusercontent.com/VitaKaninen/YouTube-Autoplay-Blocker/main/YouTube-Autoplay-Blocker.user.js
 // @updateURL    https://raw.githubusercontent.com/VitaKaninen/YouTube-Autoplay-Blocker/main/YouTube-Autoplay-Blocker.user.js
 // ==/UserScript==
@@ -39,7 +38,6 @@
   let firstVideo = true;
   let rec = null;         // timing record for the current video
   let navStart = 0;       // performance.now() at the start of the current navigation
-  const menuIds = [];
 
   function readSettings() {
     try {
@@ -79,7 +77,8 @@
       video: id,
       blocking: cfg.enabled,
       spa: !firstVideo,
-      playerMs: null, firstAutoPlayMs: null, clickMs: null, canplayMs: null, playingMs: null,
+      playerMs: null, firstAutoPlayMs: null, clickMs: null, loadstartMs: null, metaMs: null,
+      mediaReqMs: null, mediaRespMs: null, canplayMs: null, playingMs: null,
       clicks: 0, blocked: 0,
     };
   }
@@ -108,7 +107,7 @@
         const v = rows.map((r) => r[k]).filter((x) => x !== null).sort((a, b) => a - b);
         return v.length ? v[Math.floor(v.length / 2)] : "-";
       };
-      console.log(`${label}: n=${rows.length}  median player=${med("playerMs")}ms  click=${med("clickMs")}ms  canplay=${med("canplayMs")}ms  playing=${med("playingMs")}ms`);
+      console.log(`${label}: n=${rows.length}  median player=${med("playerMs")}  click=${med("clickMs")}  loadstart=${med("loadstartMs")}  mediaReq=${med("mediaReqMs")}  mediaResp=${med("mediaRespMs")}  meta=${med("metaMs")}  canplay=${med("canplayMs")}  playing=${med("playingMs")}`);
     };
     summarise(list.filter((r) => r.blocking && !r.spa), "blocking ON, full load ");
     summarise(list.filter((r) => !r.blocking && !r.spa), "blocking OFF, full load");
@@ -168,6 +167,8 @@
       log("blocked play");
       el.pause();
     });
+    el.addEventListener("loadstart", () => { log("loadstart"); mark("loadstartMs"); });
+    el.addEventListener("loadedmetadata", () => { log("loadedmetadata"); mark("metaMs"); });
     el.addEventListener("canplay", () => { log("canplay"); mark("canplayMs"); });
     el.addEventListener("playing", () => { log("playing"); mark("playingMs"); badge(false); });
     el.addEventListener("pause", () => { log("pause event"); badge(false); });
@@ -201,23 +202,31 @@
 
   window.addEventListener("yt-navigate-start", () => { navStart = performance.now(); });
 
+  // First media segment request: when it left and when it came back.
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) {
+      if (!/googlevideo\.com\/videoplayback/.test(e.name)) continue;
+      mark("mediaReqMs", Math.round(e.startTime - navStart));
+      mark("mediaRespMs", Math.round(e.responseEnd - navStart));
+    }
+  }).observe({ type: "resource", buffered: true });
+
   // ---- menu
   function buildMenu() {
-    menuIds.splice(0).forEach((id) => GM_unregisterMenuCommand(id));
     const toggle = (label, key) => {
-      menuIds.push(GM_registerMenuCommand(`${cfg[key] ? "☑" : "☐"} ${label}`, () => {
+      GM_registerMenuCommand(`${cfg[key] ? "☑" : "☐"} ${label}`, () => {
         cfg[key] = !cfg[key];
         saveSettings();
         buildMenu();
-      }));
+      }, { id: key });
     };
     toggle("Blocking enabled", "enabled");
     toggle("Block first video on page load", "blockOnPageLoad");
     toggle("Keyboard play counts as intent", "keyboardIsIntent");
     toggle("Show \"queued\" badge", "queuedBadge");
     toggle("Console logging", "log");
-    menuIds.push(GM_registerMenuCommand("Print timing log to console", printTimings));
-    menuIds.push(GM_registerMenuCommand("Clear timing log", () => GM_setValue(TIMING_KEY, "[]")));
+    GM_registerMenuCommand("Print timing log to console", printTimings, { id: "print" });
+    GM_registerMenuCommand("Clear timing log", () => GM_setValue(TIMING_KEY, "[]"), { id: "clear" });
   }
   buildMenu();
 

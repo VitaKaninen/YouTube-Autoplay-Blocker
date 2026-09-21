@@ -26,6 +26,18 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   what the timing log is for.
 - Timing log: one record per video id, flushed on first `playing`; menu "Print timing log"
   gives `console.table` plus medians split by blocking on/off and full-load vs SPA.
+- Menu commands use `{ id }` so `buildMenu()` replaces entries; without it Tampermonkey on
+  Firefox kept stale handlers and "Print" ran twice.
+
+## Measured (LibreWolf, user's machine, 2026-09-21, 30 full loads of one video)
+- `playing` median: LW autoplay-block + script 16.5 s, script only 16.5 s, neither 17.1 s.
+  Neither blocker costs anything. The ~14 s from player-appears to `canplay` is LibreWolf
+  itself (Chromium pane: ~0.7 s); 3 of 30 runs took ~3.7 s. v0.3.0 added loadstart / metadata /
+  first `videoplayback` request+response timestamps to locate it.
+- With LW's setting on, Firefox rejects `play()` before any event: `firstAutoPlayMs` stays null.
+- Pause-after-`play` can show a frame or two when data is already buffered ("split second of
+  playback"). Refusing the `play()` call itself (prototype patch in page context) would close
+  it; untested how Tampermonkey's Firefox sandbox handles that.
 
 ## Testing in the built-in browser pane
 No Tampermonkey there: inject the script with `GM_*` shims on a results page and SPA-click into
