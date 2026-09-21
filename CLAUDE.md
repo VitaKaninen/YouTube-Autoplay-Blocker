@@ -33,12 +33,12 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
 - `playing` median: LW autoplay-block + script 16.5 s, script only 16.5 s, neither 17.1 s.
   Neither blocker costs anything. The ~14 s from player-appears to `canplay` is LibreWolf
   itself (Chromium pane: ~0.7 s); 3 of 30 runs took ~3.7 s.
-- Located (v0.4.0 fields + console): one `videoplayback?...sabr=1` request, 200 in 300 ms, then
-  silence, then an HLS manifest fetch (`manifest.googlevideo.com/.../hls_variant`) and playback
-  at ~16 s. SABR stalls and the player falls back to HLS. The attestation script
-  (`google.com/js/th/*.js`) logs "Failed to create WebGL context" - LibreWolf ships
-  `webgl.disabled=true`. Hypothesis: no WebGL -> no PO token -> SABR timeout -> HLS fallback.
-  Test = flip `webgl.disabled`, then `privacy.resistFingerprinting`, one at a time.
+- Cause (bisected 2026-09-21): NoScript had doubleclick.net at its *Default* preset (no
+  capability boxes, not blocked). One `videoplayback?...sabr=1` request returned 200 in 300 ms,
+  then silence, then an HLS manifest fetch and playback at ~16 s - SABR stalled and fell back to
+  HLS. Setting doubleclick.net to *Untrusted* -> ~3 s. Each NoScript change only takes effect
+  after a browser restart (player caches the decision per session); that is what made the
+  earlier WebGL / RFP / Troubleshoot-Mode results look inconsistent. WebGL and RFP were not it.
 - With LW's setting on, Firefox rejects `play()` before any event: `firstAutoPlayMs` stays null.
 - Pause-after-`play` can show a frame or two when data is already buffered ("split second of
   playback"). Refusing the `play()` call itself (prototype patch in page context) would close
