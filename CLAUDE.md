@@ -10,8 +10,8 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   block returns, which YouTube handles by showing the Play button) and dispatches `ytab-refused`.
   Pausing from the `play` event instead lets a frame or two render when data is already buffered
   (ctrl-click background tabs, discarded-tab restores); that listener remains only as a fallback.
-  Sandbox <-> page channel is `data-ytab-gate` / `data-ytab-intent` on `<html>` (`setIntent()` is
-  the only writer of intent); `data-ytab-gate-installed` is the page-side read-back.
+  Sandbox <-> page channel is `data-ytab-intent` on `<html>` (`setIntent()` is its only writer);
+  `data-ytab-gate-installed` is the page-side read-back.
   YouTube enforces Trusted Types: `script.textContent = src` throws, so the catch creates a
   policy (`trustedTypes.createPolicy`, allowed by YouTube's CSP) and retries.
   v0.6-0.7 patched `unsafeWindow.HTMLMediaElement.prototype` from the sandbox; under Firefox
@@ -30,7 +30,6 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   (keydown for keys) so YouTube never sees it. When data then arrives YouTube does not re-request
   play; the next click plays normally. YouTube's own spinner stays up after a cancel, hence the
   "cancelled" badge state.
-- `firstVideo` distinguishes the page-load video (governed by `blockOnPageLoad`) from later ones.
 - `syncVideo()` fires twice on a full load (id known at document-start, `<video>` later); only
   the id change resets intent, the element change only hooks.
 
@@ -80,5 +79,9 @@ Clean-room reimplementation of the *technique* (intent flag + pause-on-play + re
 used by several MIT-licensed Greasyfork scripts. No code was copied; no attribution obligation.
 
 ## Settings
-Stored as one JSON blob under GM key `settings`; toggled from the userscript menu.
+One JSON blob under GM key `settings`, toggled from the userscript menu. Only the badge toggle
+remains (v0.10.0): "blocking enabled" duplicated Tampermonkey's own switch, "block first video on
+page load" off allowed exactly the full-load autoplay the script exists to stop, "keyboard is
+intent" off made Space/k unable to start a blocked video, "refuse play()" off was the v0.5
+pause-after-play A/B route. Do not reintroduce them.
 Test setting changes by reloading the page, not by reopening the menu.

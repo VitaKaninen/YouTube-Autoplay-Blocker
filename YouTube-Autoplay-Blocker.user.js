@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.9.0
+// @version      0.10.0
 // @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; any other play() call is refused before it starts (or paused again immediately as a fallback). While a requested play is still waiting for data, a second click or play key cancels it (YouTube itself would just request play again); a badge shows whether the pending state is play or pause.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
@@ -19,10 +19,6 @@
 
   const STORE_KEY = "settings";
   const DEFAULTS = {
-    enabled: true,           // master switch
-    blockOnPageLoad: true,   // also block the first video after a full load / reload
-    keyboardIsIntent: true,  // Space / k / MediaPlayPause count as "the user wants this"
-    refusePlay: true,        // reject unrequested play() calls outright instead of pausing after
     queuedBadge: true,       // play / pause badge on the player while a request waits for data
   };
   const INTENT_SELECTOR = "#movie_player, ytd-thumbnail, ytd-playlist-panel-video-renderer, ytd-compact-video-renderer, ytd-rich-item-renderer, a[href*='/watch'], a[href*='/shorts/']";
@@ -34,7 +30,7 @@
   const GATE_SRC = `(() => {
     const proto = HTMLMediaElement.prototype, nativePlay = proto.play, html = document.documentElement;
     proto.play = function () {
-      if (html.dataset.ytabGate !== "1" || html.dataset.ytabIntent === "1" || !this.closest("#movie_player")) return nativePlay.apply(this, arguments);
+      if (html.dataset.ytabIntent === "1" || !this.closest("#movie_player")) return nativePlay.apply(this, arguments);
       return Promise.reject(new DOMException("Autoplay blocked by YouTube Autoplay Blocker", "NotAllowedError"));
     };
     html.dataset.ytabGateInstalled = "1";
@@ -44,7 +40,6 @@
   let userWantsPlay = false;
   let currentVideoId = null;
   let video = null;
-  let firstVideo = true;
   let badgeState = null;  // null | "play" | "pause"
   let swallowClick = false;
 
@@ -95,8 +90,7 @@
 
   // Inject GATE_SRC into the page; a Trusted Types policy is needed where the CSP enforces one.
   function installPlayGate() {
-    HTML.dataset.ytabGate = cfg.enabled && cfg.refusePlay ? "1" : "0";
-    HTML.dataset.ytabIntent = userWantsPlay ? "1" : "0";
+    HTML.dataset.ytabIntent = "0";
     const s = document.createElement("script");
     try {
       s.textContent = GATE_SRC;
@@ -116,8 +110,7 @@
     const idChanged = id !== null && id !== currentVideoId;
     const elChanged = el && el !== video;
     if (idChanged || (elChanged && id === null)) {
-      setIntent(!cfg.enabled || (firstVideo && !cfg.blockOnPageLoad));
-      firstVideo = false;
+      setIntent(false);
       currentVideoId = id;
       badge(null);
     }
@@ -141,7 +134,7 @@
 
   // A play request still waiting for data: YouTube treats every further click as "play" again.
   function isQueued() {
-    return cfg.enabled && userWantsPlay && video && !video.paused && video.readyState < 3;
+    return userWantsPlay && video && !video.paused && video.readyState < 3;
   }
 
   // Second click / key while queued: withdraw the request and keep the event from YouTube.
@@ -176,7 +169,7 @@
   window.addEventListener("keydown", (e) => {
     if (isTextTarget(e.target) || !PLAY_KEYS.has(e.key)) return;
     if (isQueued()) { cancelQueued(e); return; }
-    if (cfg.keyboardIsIntent) setIntent(true);
+    setIntent(true);
   }, true);
 
   // ---- menu
@@ -185,14 +178,9 @@
       GM_registerMenuCommand(`${cfg[key] ? "☑" : "☐"} ${label}`, () => {
         cfg[key] = !cfg[key];
         saveSettings();
-        HTML.dataset.ytabGate = cfg.enabled && cfg.refusePlay ? "1" : "0";
         buildMenu();
       }, { id: key });
     };
-    toggle("Blocking enabled", "enabled");
-    toggle("Block first video on page load", "blockOnPageLoad");
-    toggle("Keyboard play counts as intent", "keyboardIsIntent");
-    toggle("Refuse play() outright (else pause after)", "refusePlay");
     toggle("Show play / pause badge while waiting for data", "queuedBadge");
   }
   installPlayGate();
