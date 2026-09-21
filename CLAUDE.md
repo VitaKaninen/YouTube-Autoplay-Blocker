@@ -4,7 +4,13 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
 (version bumps, commit+push, comment budget, load-order of `const`s above `cfg`).
 
 ## How it works
-- A `play` listener on `video.html5-main-video` calls `pause()` unless `userWantsPlay` is set.
+- `installPlayGate()` replaces `HTMLMediaElement.prototype.play` on `unsafeWindow`; a call on the
+  hooked main video with no intent returns a page-side rejected `NotAllowedError` promise (what
+  Firefox's own block returns, which YouTube handles by showing the Play button). Pausing from
+  the `play` event instead lets a frame or two render when data is already buffered (background
+  / discarded-tab loads) - that is the "split second of playback"; the event listener remains only
+  as a fallback. Uses `exportFunction` when present (Firefox content-script sandbox) else direct
+  assignment, and warns if the read-back shows the patch did not take. `refusePlay` toggles it.
 - Intent is set by capture `mousedown` on `INTENT_SELECTOR` (player, thumbnails, watch/shorts
   links) or capture `keydown` of Space / k / MediaPlayPause outside text fields.
 - Intent is cleared in `syncVideo()` whenever the `?v=` / `/shorts/` id changes or the `<video>`
@@ -17,10 +23,11 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
 
 ## Measured (Chromium pane, 2026-09-21)
 - YouTube's play/pause button follows `playing`, not the `play()` request. A click at
-  `readyState 0` flips `video.paused` to false within ~10 ms but the button stays "Play" until
-  data arrives (~350-700 ms). The "queued" badge exists to fill that gap; it is driven by the
-  `<video>` events (`play` with readyState<3 shows it, `playing`/`pause` hide it) so it is always
-  true to the element state, including a second click that pauses.
+  `readyState 0` flips `video.paused` within ~10 ms (a second click pauses again) but the button
+  stays "Play" until data arrives (~350-700 ms). A "queued" badge filled that gap in v0.2-0.5;
+  removed at the user's request once the behaviour was understood.
+- play() gate verified in the pane (v0.6.0): one `refused play()` at 343 ms, no `play` event,
+  `currentTime` stayed 0, player in `unstarted-mode`; a real click then played normally.
 - Buffering continues while blocked: `loadstart -> canplay` took ~700-800 ms with or without the
   block. So blocking does not obviously delay readiness in Chromium; Firefox is unmeasured and is
   what the timing log is for.
@@ -40,9 +47,9 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   after a browser restart (player caches the decision per session); that is what made the
   earlier WebGL / RFP / Troubleshoot-Mode results look inconsistent. WebGL and RFP were not it.
 - With LW's setting on, Firefox rejects `play()` before any event: `firstAutoPlayMs` stays null.
-- Pause-after-`play` can show a frame or two when data is already buffered ("split second of
-  playback"). Refusing the `play()` call itself (prototype patch in page context) would close
-  it; untested how Tampermonkey's Firefox sandbox handles that.
+- Pause-after-`play` showed a frame or two when data was already buffered (ctrl-click background
+  tabs, Auto Tab Discard restores). v0.6.0 refuses the `play()` call instead; Firefox behaviour
+  under Tampermonkey's sandbox is the user's to confirm (console warns if the patch did not take).
 
 ## Testing in the built-in browser pane
 No Tampermonkey there: inject the script with `GM_*` shims on a results page and SPA-click into

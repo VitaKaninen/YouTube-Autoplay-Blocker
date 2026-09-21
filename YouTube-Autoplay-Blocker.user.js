@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.5.0
-// @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; anything else that calls play() is paused again immediately. Shows a "queued" badge while a requested play waits for data, and keeps a per-load timing log for comparing with/without blocking.
+// @version      0.6.0
+// @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; any other play() call is refused before it starts (or paused again immediately as a fallback). Keeps a per-load timing log for comparing with/without blocking.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
 // @run-at       document-start
 // @noframes
+// @grant        unsafeWindow
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
@@ -24,13 +25,12 @@
     enabled: true,           // master switch; timing log still records when off
     blockOnPageLoad: true,   // also block the first video after a full load / reload
     keyboardIsIntent: true,  // Space / k / MediaPlayPause count as "the user wants this"
-    queuedBadge: true,       // "▶ queued" on the player while an accepted play() waits for data
+    refusePlay: true,        // reject unrequested play() calls outright instead of pausing after
     log: false,
   };
   const INTENT_SELECTOR = "#movie_player, ytd-thumbnail, ytd-playlist-panel-video-renderer, ytd-compact-video-renderer, ytd-rich-item-renderer, a[href*='/watch'], a[href*='/shorts/']";
   const PLAY_BUTTON_SELECTOR = ".ytp-play-button, .ytp-large-play-button, .html5-video-container";
   const PLAY_KEYS = new Set([" ", "k", "K", "MediaPlayPause"]);
-  const BADGE_ID = "yt-autoplay-blocker-badge";
 
   let cfg = Object.assign({}, DEFAULTS, readSettings());
   let userWantsPlay = false;
@@ -116,22 +116,20 @@
     summarise(list.filter((r) => !r.blocking && r.spa), "blocking OFF, SPA nav  ");
   }
 
-  // ---- queued badge
-  function badge(show) {
-    const old = document.getElementById(BADGE_ID);
-    if (!show) { if (old) old.remove(); return; }
-    if (old || !cfg.queuedBadge) return;
-    const player = document.getElementById("movie_player");
-    if (!player) return;
-    const el = document.createElement("div");
-    el.id = BADGE_ID;
-    el.textContent = "▶ queued";
-    Object.assign(el.style, {
-      position: "absolute", top: "12px", left: "12px", zIndex: "9999", pointerEvents: "none",
-      padding: "4px 10px", borderRadius: "6px", font: "600 13px/1.4 Roboto, Arial, sans-serif",
-      color: "#cdd6f4", background: "rgba(30,30,46,.85)", border: "1px solid #89b4fa",
-    });
-    player.appendChild(el);
+  // ---- play() gate
+  // Reject an unrequested play() on the main video before the decoder starts.
+  function installPlayGate() {
+    const proto = unsafeWindow.HTMLMediaElement.prototype;
+    const nativePlay = proto.play;
+    const gated = function () {
+      if (userWantsPlay || !cfg.refusePlay || this !== video) return nativePlay.call(this);
+      mark("firstAutoPlayMs");
+      if (rec) rec.blocked++;
+      log("refused play()");
+      return unsafeWindow.Promise.reject(new unsafeWindow.DOMException("Autoplay blocked by YouTube Autoplay Blocker", "NotAllowedError"));
+    };
+    proto.play = typeof exportFunction === "function" ? exportFunction(gated, unsafeWindow) : gated;
+    if (proto.play === nativePlay) console.warn("[Autoplay Blocker] play() gate not installed; pause-after-play fallback only");
   }
 
   // ---- video hookup
@@ -147,7 +145,6 @@
       startRecord(id);
       firstVideo = false;
       currentVideoId = id;
-      badge(false);
     }
     if (elChanged) {
       video = el;
@@ -156,13 +153,13 @@
     if (el) mark("playerMs");
   }
 
-  // Pause any play() the user did not ask for; record the lifecycle.
+  // Fallback: pause any play that slipped past the gate; record the lifecycle.
   function hookVideo(el) {
     if (el.dataset.autoplayBlockerHooked) return;
     el.dataset.autoplayBlockerHooked = "1";
     el.addEventListener("play", () => {
       log("play event, readyState", el.readyState);
-      if (userWantsPlay) { if (el.readyState < 3) badge(true); return; }
+      if (userWantsPlay) return;
       mark("firstAutoPlayMs");
       if (rec) rec.blocked++;
       log("blocked play");
@@ -171,8 +168,8 @@
     el.addEventListener("loadstart", () => { log("loadstart"); mark("loadstartMs"); });
     el.addEventListener("loadedmetadata", () => { log("loadedmetadata"); mark("metaMs"); });
     el.addEventListener("canplay", () => { log("canplay"); mark("canplayMs"); });
-    el.addEventListener("playing", () => { log("playing"); mark("playingMs"); badge(false); });
-    el.addEventListener("pause", () => { log("pause event"); badge(false); });
+    el.addEventListener("playing", () => { log("playing"); mark("playingMs"); });
+    el.addEventListener("pause", () => { log("pause event"); });
   }
 
   function grantIntent(reason) {
@@ -226,12 +223,13 @@
     toggle("Blocking enabled", "enabled");
     toggle("Block first video on page load", "blockOnPageLoad");
     toggle("Keyboard play counts as intent", "keyboardIsIntent");
-    toggle("Show \"queued\" badge", "queuedBadge");
+    toggle("Refuse play() outright (else pause after)", "refusePlay");
     toggle("Console logging", "log");
     GM_registerMenuCommand("Print timing log to console", printTimings, { id: "print" });
     GM_registerMenuCommand("Clear timing log", () => GM_setValue(TIMING_KEY, "[]"), { id: "clear" });
   }
   buildMenu();
+  installPlayGate();
 
   new MutationObserver(syncVideo).observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("yt-navigate-finish", syncVideo);
