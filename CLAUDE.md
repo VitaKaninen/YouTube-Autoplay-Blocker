@@ -17,6 +17,13 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   element is replaced; driven by a MutationObserver on `documentElement` plus `yt-navigate-finish`.
   YouTube usually reuses the same `<video>` across SPA navigation, so the id check is the one
   that normally fires.
+- While a requested play waits for data (`isQueued()`: intent set, `!paused`, readyState<3)
+  YouTube is in `unstarted-mode` and treats EVERY further click / play key as another play
+  request - it never pauses (measured: 3 clicks, 3 `play()` calls). So `cancelQueued()` takes
+  that click on `window` capture: clears intent, `pause()`s, swallows mousedown/mouseup/click
+  (keydown for keys) so YouTube never sees it. When data then arrives YouTube does not re-request
+  play; the next click plays normally. YouTube's own spinner stays up after a cancel, hence the
+  "cancelled" badge state.
 - `firstVideo` distinguishes the page-load video (governed by `blockOnPageLoad`) from later ones.
 - `syncVideo()` fires twice on a full load (id known at document-start, `<video>` later); only
   the id change resets intent / starts a timing record, the element change only hooks.
@@ -24,8 +31,8 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
 ## Measured (Chromium pane, 2026-09-21)
 - YouTube's play/pause button follows `playing`, not the `play()` request. A click at
   `readyState 0` flips `video.paused` within ~10 ms (a second click pauses again) but the button
-  stays "Play" until data arrives (~350-700 ms). A "queued" badge filled that gap in v0.2-0.5;
-  removed at the user's request once the behaviour was understood.
+  stays "Play" until data arrives (~350-700 ms). The badge ("queued" / "cancelled") is driven by
+  `<video>` events plus `cancelQueued()`, never by click counting.
 - play() gate verified in the pane (v0.6.0): one `refused play()` at 343 ms, no `play` event,
   `currentTime` stayed 0, player in `unstarted-mode`; a real click then played normally.
 - Buffering continues while blocked: `loadstart -> canplay` took ~700-800 ms with or without the
@@ -52,6 +59,10 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   under Tampermonkey's sandbox is the user's to confirm (console warns if the patch did not take).
 
 ## Testing in the built-in browser pane
+To hold the media at readyState 0 for as long as needed, wrap `window.fetch` and return a
+never-settling promise for URLs matching `videoplayback` (keep the resolvers to release later);
+YouTube fetches media with fetch, not XHR, in the pane. That is how the queued/cancel path was
+verified (v0.7.0).
 No Tampermonkey there: inject the script with `GM_*` shims on a results page and SPA-click into
 a video (the instance survives). Injection after a full navigation lands ~3 s late, too late to
 see the initial autoplay. `document.getElementById('movie_player').loadVideoById(id)` resets the

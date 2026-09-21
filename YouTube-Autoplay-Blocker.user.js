@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.6.0
-// @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; any other play() call is refused before it starts (or paused again immediately as a fallback). Keeps a per-load timing log for comparing with/without blocking.
+// @version      0.7.0
+// @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; any other play() call is refused before it starts (or paused again immediately as a fallback). While a requested play is still waiting for data, a second click or play key cancels it (YouTube itself would just request play again); a badge shows "queued" / "cancelled". Keeps a per-load timing log for comparing with/without blocking.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
 // @run-at       document-start
@@ -26,11 +26,13 @@
     blockOnPageLoad: true,   // also block the first video after a full load / reload
     keyboardIsIntent: true,  // Space / k / MediaPlayPause count as "the user wants this"
     refusePlay: true,        // reject unrequested play() calls outright instead of pausing after
+    queuedBadge: true,       // "queued" / "cancelled" badge on the player while a play waits for data
     log: false,
   };
   const INTENT_SELECTOR = "#movie_player, ytd-thumbnail, ytd-playlist-panel-video-renderer, ytd-compact-video-renderer, ytd-rich-item-renderer, a[href*='/watch'], a[href*='/shorts/']";
   const PLAY_BUTTON_SELECTOR = ".ytp-play-button, .ytp-large-play-button, .html5-video-container";
   const PLAY_KEYS = new Set([" ", "k", "K", "MediaPlayPause"]);
+  const BADGE_ID = "yt-autoplay-blocker-badge";
 
   let cfg = Object.assign({}, DEFAULTS, readSettings());
   let userWantsPlay = false;
@@ -39,6 +41,8 @@
   let firstVideo = true;
   let rec = null;         // timing record for the current video
   let navStart = 0;       // performance.now() at the start of the current navigation
+  let badgeState = null;  // null | "queued" | "cancelled"
+  let swallowClick = false;
 
   function readSettings() {
     try {
@@ -116,6 +120,26 @@
     summarise(list.filter((r) => !r.blocking && r.spa), "blocking OFF, SPA nav  ");
   }
 
+  // ---- badge
+  function badge(state) {
+    badgeState = state;
+    const old = document.getElementById(BADGE_ID);
+    if (!state) { if (old) old.remove(); return; }
+    if (!cfg.queuedBadge) return;
+    const player = document.getElementById("movie_player");
+    if (!player) return;
+    const el = old || document.createElement("div");
+    el.id = BADGE_ID;
+    el.textContent = state === "queued" ? "▶ queued" : "⏸ cancelled";
+    Object.assign(el.style, {
+      position: "absolute", top: "12px", left: "12px", zIndex: "9999", pointerEvents: "none",
+      padding: "4px 10px", borderRadius: "6px", font: "600 13px/1.4 Roboto, Arial, sans-serif",
+      color: "#cdd6f4", background: "rgba(30,30,46,.85)",
+      border: "1px solid " + (state === "queued" ? "#89b4fa" : "#f9e2af"),
+    });
+    if (!old) player.appendChild(el);
+  }
+
   // ---- play() gate
   // Reject an unrequested play() on the main video before the decoder starts.
   function installPlayGate() {
@@ -145,6 +169,7 @@
       startRecord(id);
       firstVideo = false;
       currentVideoId = id;
+      badge(null);
     }
     if (elChanged) {
       video = el;
@@ -159,7 +184,7 @@
     el.dataset.autoplayBlockerHooked = "1";
     el.addEventListener("play", () => {
       log("play event, readyState", el.readyState);
-      if (userWantsPlay) return;
+      if (userWantsPlay) { badge(el.readyState < 3 ? "queued" : null); return; }
       mark("firstAutoPlayMs");
       if (rec) rec.blocked++;
       log("blocked play");
@@ -168,8 +193,23 @@
     el.addEventListener("loadstart", () => { log("loadstart"); mark("loadstartMs"); });
     el.addEventListener("loadedmetadata", () => { log("loadedmetadata"); mark("metaMs"); });
     el.addEventListener("canplay", () => { log("canplay"); mark("canplayMs"); });
-    el.addEventListener("playing", () => { log("playing"); mark("playingMs"); });
-    el.addEventListener("pause", () => { log("pause event"); });
+    el.addEventListener("playing", () => { log("playing"); mark("playingMs"); badge(null); });
+    el.addEventListener("pause", () => { log("pause event"); if (badgeState === "queued") badge(null); });
+  }
+
+  // A play request still waiting for data: YouTube treats every further click as "play" again.
+  function isQueued() {
+    return cfg.enabled && userWantsPlay && video && !video.paused && video.readyState < 3;
+  }
+
+  // Second click / key while queued: withdraw the request and keep the event from YouTube.
+  function cancelQueued(e, reason) {
+    log("cancelled queued play:", reason);
+    userWantsPlay = false;
+    video.pause();
+    badge("cancelled");
+    e.stopImmediatePropagation();
+    e.preventDefault();
   }
 
   function grantIntent(reason) {
@@ -187,13 +227,26 @@
     mark("clickMs");
   }
 
+  window.addEventListener("mousedown", (e) => {
+    if (e.target.closest(PLAY_BUTTON_SELECTOR) && isQueued()) { swallowClick = true; cancelQueued(e, "click"); }
+  }, true);
+  for (const type of ["mouseup", "click"]) {
+    window.addEventListener(type, (e) => {
+      if (!swallowClick) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (type === "click") swallowClick = false;
+    }, true);
+  }
+
   document.addEventListener("mousedown", (e) => {
     if (e.target.closest(INTENT_SELECTOR)) grantIntent("mousedown");
     if (e.target.closest(PLAY_BUTTON_SELECTOR)) notePlayRequest("click");
   }, true);
 
-  document.addEventListener("keydown", (e) => {
+  window.addEventListener("keydown", (e) => {
     if (isTextTarget(e.target) || !PLAY_KEYS.has(e.key)) return;
+    if (isQueued()) { cancelQueued(e, "key " + e.key); return; }
     if (cfg.keyboardIsIntent) grantIntent("key " + e.key);
     notePlayRequest("key " + e.key);
   }, true);
@@ -224,6 +277,7 @@
     toggle("Block first video on page load", "blockOnPageLoad");
     toggle("Keyboard play counts as intent", "keyboardIsIntent");
     toggle("Refuse play() outright (else pause after)", "refusePlay");
+    toggle("Show queued / cancelled badge", "queuedBadge");
     toggle("Console logging", "log");
     GM_registerMenuCommand("Print timing log to console", printTimings, { id: "print" });
     GM_registerMenuCommand("Clear timing log", () => GM_setValue(TIMING_KEY, "[]"), { id: "clear" });
