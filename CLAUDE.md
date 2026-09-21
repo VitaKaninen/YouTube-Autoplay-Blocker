@@ -32,7 +32,7 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
   "cancelled" badge state.
 - `firstVideo` distinguishes the page-load video (governed by `blockOnPageLoad`) from later ones.
 - `syncVideo()` fires twice on a full load (id known at document-start, `<video>` later); only
-  the id change resets intent / starts a timing record, the element change only hooks.
+  the id change resets intent, the element change only hooks.
 
 ## Measured (Chromium pane, 2026-09-21)
 - YouTube's play/pause button follows `playing`, not the `play()` request. A click at
@@ -44,10 +44,11 @@ Tampermonkey userscript. Shared rules for every script in this folder live in `.
 - Buffering continues while blocked: `loadstart -> canplay` took ~700-800 ms with or without the
   block. So blocking does not obviously delay readiness in Chromium; Firefox is unmeasured and is
   what the timing log is for.
-- Timing log: one record per video id, flushed on first `playing`; menu "Print timing log"
-  gives `console.table` plus medians split by blocking on/off and full-load vs SPA.
-- Menu commands use `{ id }` so `buildMenu()` replaces entries. `@noframes` is what actually
-  stopped "Print" running twice: every YouTube iframe was registering the same command.
+- Menu commands use `{ id }` so `buildMenu()` replaces entries. `@noframes`: without it every
+  YouTube iframe registers the same commands and a command runs once per frame.
+- The timing log / console tracing (v0.2-0.8) was removed in v0.9.0 once the measurements below
+  were in; re-add ad hoc (record per video id, flushed on first `playing`) if a new timing
+  question comes up. Only two `console.warn`s remain: settings unreadable, gate not installed.
 
 ## Measured (LibreWolf, user's machine, 2026-09-21, 30 full loads of one video)
 - `playing` median: LW autoplay-block + script 16.5 s, script only 16.5 s, neither 17.1 s.
