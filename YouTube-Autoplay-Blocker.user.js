@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Autoplay Blocker
 // @namespace    https://github.com/VitaKaninen
-// @version      0.10.0
+// @version      0.11.0
 // @description  Stops YouTube from starting a video you did not ask for. A video may play only after you clicked the player or a thumbnail, or pressed a play key; any other play() call is refused before it starts (or paused again immediately as a fallback). While a requested play is still waiting for data, a second click or play key cancels it (YouTube itself would just request play again); a badge shows whether the pending state is play or pause.
 // @author       VitaKaninen
 // @match        *://*.youtube.com/*
@@ -173,12 +173,26 @@
   }, true);
 
   // ---- menu
+  // Brief message that fades out on its own after 3 s
+  function showToast(msg) {
+    const host = document.createElement("div");
+    host.style.cssText = "all: initial !important; position: fixed !important; top: 16px !important; left: 50% !important; transform: translateX(-50%) !important; z-index: 2147483647 !important; pointer-events: none !important;";
+    const box = document.createElement("div");
+    box.textContent = msg;
+    box.style.cssText = "background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-left: 4px solid #a6e3a1; border-radius: 6px; padding: 8px 14px; font: 13px system-ui, sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,0.4); opacity: 1; transition: opacity 0.4s;";
+    host.attachShadow({ mode: "open" }).appendChild(box);
+    document.documentElement.appendChild(host);
+    setTimeout(() => { box.style.opacity = "0"; }, 3000);
+    setTimeout(() => { host.remove(); }, 3400);
+  }
+
   function buildMenu() {
     const toggle = (label, key) => {
       GM_registerMenuCommand(`${cfg[key] ? "☑" : "☐"} ${label}`, () => {
         cfg[key] = !cfg[key];
         saveSettings();
         buildMenu();
+        showToast(`${label}: ${cfg[key] ? "on" : "off"}`);
       }, { id: key, autoClose: false });
     };
     toggle("Show play / pause badge while waiting for data", "queuedBadge");
